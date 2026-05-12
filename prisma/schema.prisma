@@ -1,0 +1,133 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+}
+
+enum UserStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  DISABLED
+}
+
+model User {
+  id             String       @id @default(cuid())
+  name           String
+  email          String       @unique
+  passwordHash   String
+  role           Role         @default(ADMIN)
+  status         UserStatus   @default(PENDING)
+  departmentId   String?
+  department     Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  recordsCreated Record[]     @relation("RecordCreatedBy")
+  recordsUpdated Record[]     @relation("RecordUpdatedBy")
+  auditLogs      AuditLog[]
+}
+
+model Project {
+  id          String         @id @default(cuid())
+  name        String
+  active      Boolean        @default(true)
+  departments Department[]
+  records     Record[]
+  columns     RecordColumn[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+model Department {
+  id          String                 @id @default(cuid())
+  name        String
+  active      Boolean                @default(true)
+  projectId   String?
+  project     Project?               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  users       User[]
+  permissions DepartmentPermission[]
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  @@unique([projectId, name])
+}
+
+model DepartmentPermission {
+  id           String     @id @default(cuid())
+  departmentId String
+  columnKey    String
+  canEdit      Boolean    @default(false)
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@unique([departmentId, columnKey])
+}
+
+model Record {
+  id         String     @id
+  projectId  String?
+  project    Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  firstName  String?
+  lastName   String?
+  age        Int?
+  gender     String?
+  weightKg   Float?
+  heightCm   Float?
+  occupation String?
+  createdById String?
+  updatedById String?
+  createdBy  User?      @relation("RecordCreatedBy", fields: [createdById], references: [id])
+  updatedBy  User?      @relation("RecordUpdatedBy", fields: [updatedById], references: [id])
+  auditLogs  AuditLog[]
+  cellValues RecordCellValue[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+model RecordColumn {
+  id        String            @id @default(cuid())
+  projectId String?
+  project   Project?          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key       String
+  label     String
+  type      String            @default("text")
+  active    Boolean           @default(true)
+  position  Int               @default(0)
+  values    RecordCellValue[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@unique([projectId, key])
+}
+
+model RecordCellValue {
+  id        String       @id @default(cuid())
+  recordId  String
+  columnId  String
+  value     String?
+  record    Record       @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  column    RecordColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([recordId, columnId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  recordId  String
+  columnKey String
+  oldValue  String?
+  newValue  String?
+  user      User     @relation(fields: [userId], references: [id])
+  record    Record   @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
