@@ -6,3 +6,4 @@ prisma/dev.db
 prisma/dev.db-journal
 .DS_Store
 .scratch
+tsconfig.tsbuildinfo
