@@ -15,7 +15,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
-RUN npm run build
+ENV DATABASE_URL="file:/app/prisma/dev.db"
+RUN npx prisma db push && npm run build
 
 # Step 3: Production image runner
 FROM base AS runner
