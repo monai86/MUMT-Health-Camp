@@ -1,0 +1,15 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: excel_admin_app
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./prisma_data:/app/prisma
+    environment:
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - DATABASE_URL=file:/app/prisma/dev.db
