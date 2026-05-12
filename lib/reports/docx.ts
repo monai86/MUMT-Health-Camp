@@ -1,10 +1,15 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import JSZip from "jszip";
 import { db } from "@/lib/db";
 import { asNumber } from "@/lib/format";
 
 const templatePath = path.join(process.cwd(), "storage", "templates", "default-health-report.docx");
+const execFileAsync = promisify(execFile);
 
 type ReportRecord = {
   id: string;
@@ -67,11 +72,27 @@ function formatBmi(weight: string, height: string) {
   return (weightKg / (heightCm / 100) ** 2).toFixed(2);
 }
 
+function formatThaiDateTime(date: Date) {
+  const datePart = new Intl.DateTimeFormat("th-TH", {
+    dateStyle: "long",
+    timeZone: "Asia/Bangkok"
+  }).format(date);
+  const timePart = new Intl.DateTimeFormat("th-TH", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Bangkok"
+  }).format(date);
+  return `${datePart} เวลา ${timePart} น.`;
+}
+
 function reportDataFromRecord(record: ReportRecord): ReportData {
   const valueFrom = createValueLookup(record);
   const weight = valueFrom(["น้ำหนัก", "นำหนัก", "weight"]);
   const height = valueFrom(["ส่วนสูง", "height"]);
   const bmi = valueFrom(["ดัชนีมวลกาย", "bmi"]) || formatBmi(weight, height);
+  const printedAt = new Date();
+  const certifiedAt = new Date(printedAt.getTime() + 5 * 60 * 1000);
 
   return {
     fullName: valueFrom(["ชื่อนามสกุล", "ชื่อ-นามสกุล", "name"]),
@@ -100,7 +121,9 @@ function reportDataFromRecord(record: ReportRecord): ReportData {
     urineSediment: valueFrom(["ตะกอนปัสสาวะ"]),
     fecesResult: valueFrom(["ผลการตรวจfeces", "ผลการตรวจอุจจาระ"]),
     fecesMethod: valueFrom(["วิธีการตรวจ"]),
-    reportDate: new Intl.DateTimeFormat("th-TH", { dateStyle: "long" }).format(new Date())
+    reportDate: formatThaiDateTime(printedAt),
+    reportedAt: formatThaiDateTime(printedAt),
+    certifiedAt: formatThaiDateTime(certifiedAt)
   };
 }
 
@@ -122,9 +145,45 @@ function makeParagraph(original: string, runs: string) {
   return `${open}${pPr}${runs}</w:p>`;
 }
 
+function runFromText(value: string, runPr = "", options: { fallbackSize?: number; bold?: boolean } = {}) {
+  const size = options.fallbackSize ?? 28;
+  const fallbackPr = `<w:rPr><w:rFonts w:ascii="TH SarabunPSK" w:hAnsi="TH SarabunPSK" w:cs="TH SarabunPSK" w:eastAsia="TH SarabunPSK"/>${options.bold ? "<w:b/><w:bCs/>" : ""}<w:sz w:val="${size}"/><w:szCs w:val="${size}"/></w:rPr>`;
+  const rPr = runPr || fallbackPr;
+  return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(value || "-")}</w:t></w:r>`;
+}
+
+function firstRunPr(xml: string, fallbackSize = 28) {
+  return xml.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)?.[0] ?? `<w:rPr><w:rFonts w:ascii="TH SarabunPSK" w:hAnsi="TH SarabunPSK" w:cs="TH SarabunPSK" w:eastAsia="TH SarabunPSK"/><w:sz w:val="${fallbackSize}"/><w:szCs w:val="${fallbackSize}"/></w:rPr>`;
+}
+
+function appendTextToParagraph(paragraph: string, value: string, fallbackSize = 28) {
+  const runPr = firstRunPr(paragraph, fallbackSize);
+  return paragraph.replace(/<\/w:p>$/, `${runFromText(value, runPr, { fallbackSize })}</w:p>`);
+}
+
+function fillLabelParagraphs(xml: string, label: string, value: string) {
+  return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (paragraph) => {
+    const text = visibleText(paragraph);
+    if (!text.includes(label)) return paragraph;
+    if (text.includes(value)) return paragraph;
+    return appendTextToParagraph(paragraph, value, 28);
+  });
+}
+
 function setCellText(cellXml: string, value: string, size = 28) {
   const tcPr = cellXml.match(/<w:tcPr>[\s\S]*?<\/w:tcPr>/)?.[0] ?? "";
-  return `<w:tc>${tcPr}<w:p><w:pPr><w:jc w:val="center"/><w:rPr><w:rFonts w:ascii="TH SarabunPSK" w:hAnsi="TH SarabunPSK" w:cs="TH SarabunPSK"/><w:sz w:val="${size}"/><w:szCs w:val="${size}"/></w:rPr></w:pPr><w:r><w:rPr><w:rFonts w:ascii="TH SarabunPSK" w:hAnsi="TH SarabunPSK" w:cs="TH SarabunPSK" w:eastAsia="TH SarabunPSK"/><w:sz w:val="${size}"/><w:szCs w:val="${size}"/></w:rPr>${multilineRun(value, size)}</w:r></w:p></w:tc>`;
+  const firstParagraph = cellXml.match(/<w:p\b[\s\S]*?<\/w:p>/)?.[0];
+  if (!firstParagraph) {
+    return `<w:tc>${tcPr}<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="TH SarabunPSK" w:hAnsi="TH SarabunPSK" w:cs="TH SarabunPSK" w:eastAsia="TH SarabunPSK"/><w:sz w:val="${size}"/><w:szCs w:val="${size}"/></w:rPr>${multilineRun(value, size)}</w:r></w:p></w:tc>`;
+  }
+
+  const pPr = firstParagraph.match(/<w:pPr>[\s\S]*?<\/w:pPr>/)?.[0] ?? `<w:pPr><w:jc w:val="center"/></w:pPr>`;
+  const runPr = firstRunPr(firstParagraph, size);
+  const updatedParagraph = firstParagraph.replace(
+    /<w:p\b([^>]*)>[\s\S]*?<\/w:p>/,
+    `<w:p$1>${pPr}<w:r>${runPr}${multilineRun(value, size)}</w:r></w:p>`
+  );
+  return cellXml.replace(firstParagraph, updatedParagraph);
 }
 
 function replaceCell(rowXml: string, cellIndex: number, value: string, size = 28) {
@@ -212,6 +271,9 @@ function applyReportData(documentXml: string, data: ReportData) {
     return replacement ? replacement.build(paragraph) : paragraph;
   });
 
+  xml = fillLabelParagraphs(xml, "วันที่รายงานผล", data.reportedAt);
+  xml = fillLabelParagraphs(xml, "วันที่รับรองผล", data.certifiedAt);
+
   const urineResults = [
     data.specificGravity,
     data.ph,
@@ -291,4 +353,54 @@ export async function buildHealthReportDocx(record: ReportRecord, options: { con
 
 export function reportFileName(record: ReportRecord, data = reportDataFromRecord(record)) {
   return reportFileNameFromData(record, data);
+}
+
+async function findSofficeBinary() {
+  const candidates = [
+    process.env.SOFFICE_PATH,
+    "soffice",
+    "libreoffice",
+    "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+  ].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    if (candidate.includes(path.sep)) {
+      try {
+        await fs.access(candidate);
+        return candidate;
+      } catch {
+        continue;
+      }
+    }
+    try {
+      await execFileAsync(candidate, ["--version"], { timeout: 5000 });
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+export async function convertDocxBufferToPdf(docxBuffer: Buffer) {
+  const soffice = await findSofficeBinary();
+  if (!soffice) {
+    throw new Error("ยังไม่พบ LibreOffice/soffice ในเครื่องนี้ จึงยังสร้าง PDF สำหรับพิมพ์ไม่ได้ กรุณาติดตั้ง LibreOffice ก่อน");
+  }
+
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "health-report-pdf-"));
+  const inputPath = path.join(workDir, `${randomUUID()}.docx`);
+  await fs.writeFile(inputPath, docxBuffer);
+
+  try {
+    await execFileAsync(soffice, ["--headless", "--convert-to", "pdf", "--outdir", workDir, inputPath], {
+      timeout: 30000,
+      env: { ...process.env, HOME: workDir, TMPDIR: workDir }
+    });
+    const outputPath = inputPath.replace(/\.docx$/i, ".pdf");
+    return await fs.readFile(outputPath);
+  } finally {
+    await fs.rm(workDir, { recursive: true, force: true });
+  }
 }

@@ -164,6 +164,13 @@ select:focus-visible {
   pointer-events: none;
 }
 
+.report-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .container {
   margin: 0 auto;
   max-width: 1440px;

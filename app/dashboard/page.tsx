@@ -183,13 +183,22 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   return (
                     <tr key={record.id}>
                       <td>
-                        <ReportDownloadLink
-                          className="icon-link"
-                          href={`/api/reports/docx?projectId=${project.id}&recordId=${record.id}`}
-                          iconSize={18}
-                          label="DOCX"
-                          title="ดาวน์โหลดรายงาน DOCX"
-                        />
+                        <div className="report-actions">
+                          <ReportDownloadLink
+                            className="icon-link"
+                            href={`/api/reports/pdf?projectId=${project.id}&recordId=${record.id}`}
+                            iconSize={18}
+                            label="PDF"
+                            title="เปิด PDF สำหรับพิมพ์"
+                          />
+                          <ReportDownloadLink
+                            className="icon-link"
+                            href={`/api/reports/docx?projectId=${project.id}&recordId=${record.id}`}
+                            iconSize={18}
+                            label="DOCX"
+                            title="ดาวน์โหลดรายงาน DOCX"
+                          />
+                        </div>
                       </td>
                       {columns.map((column) => {
                         const value = valueByColumn.get(column.id) ?? null;
