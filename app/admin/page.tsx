@@ -13,6 +13,8 @@ const statusLabel: Record<UserStatus, string> = {
   DISABLED: "ปิดใช้งาน"
 };
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminPage() {
   const user = await requireSuperAdmin();
   const [users, projects, departments, logs] = await Promise.all([

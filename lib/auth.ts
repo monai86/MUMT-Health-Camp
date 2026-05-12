@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { Role, UserStatus } from "@prisma/client";
@@ -10,22 +9,48 @@ function getSecret() {
   return process.env.SESSION_SECRET ?? "local-dev-secret-change-before-production";
 }
 
-function sign(value: string) {
-  return crypto.createHmac("sha256", getSecret()).update(value).digest("hex");
+function toBase64Url(bytes: Uint8Array) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function encodeSession(userId: string) {
-  const payload = Buffer.from(JSON.stringify({ userId })).toString("base64url");
-  return `${payload}.${sign(payload)}`;
+function fromBase64Url(value: string) {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
-function decodeSession(value?: string) {
+async function sign(value: string) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(getSecret()),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
+  return toBase64Url(new Uint8Array(signature));
+}
+
+async function timingSafeEqual(a: string, b: string) {
+  if (a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
+}
+
+async function decodeSession(value?: string) {
   if (!value) return null;
   const [payload, signature] = value.split(".");
-  if (!payload || !signature || sign(payload) !== signature) return null;
+  if (!payload || !signature) return null;
+  if (!(await timingSafeEqual(await sign(payload), signature))) return null;
 
   try {
-    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { userId: string };
+    const text = new TextDecoder().decode(fromBase64Url(payload));
+    return JSON.parse(text) as { userId: string };
   } catch {
     return null;
   }
@@ -33,7 +58,8 @@ function decodeSession(value?: string) {
 
 export async function createSession(userId: string) {
   const cookieStore = await cookies();
-  cookieStore.set(cookieName, encodeSession(userId), {
+  const payload = toBase64Url(new TextEncoder().encode(JSON.stringify({ userId })));
+  cookieStore.set(cookieName, `${payload}.${await sign(payload)}`, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -49,7 +75,7 @@ export async function clearSession() {
 
 export async function getCurrentUser() {
   const cookieStore = await cookies();
-  const session = decodeSession(cookieStore.get(cookieName)?.value);
+  const session = await decodeSession(cookieStore.get(cookieName)?.value);
   if (!session) return null;
 
   return db.user.findUnique({

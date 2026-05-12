@@ -4,6 +4,10 @@ import { requireApprovedUser } from "@/lib/auth";
 import { resolveProjectForUser } from "@/lib/projects";
 
 export async function GET(request: Request) {
+  if (process.env.ENABLE_PDF_EXPORT !== "true") {
+    return new NextResponse("PDF export is disabled on this deployment. Download DOCX instead.", { status: 503 });
+  }
+
   const user = await requireApprovedUser();
   const url = new URL(request.url);
   const recordId = url.searchParams.get("recordId");

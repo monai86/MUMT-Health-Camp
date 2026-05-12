@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { leavePendingAction } from "@/app/auth/actions";
 import { getCurrentUser } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+
 export default async function PendingPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");

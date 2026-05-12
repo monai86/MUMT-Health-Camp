@@ -12,9 +12,12 @@ import { resolveProjectForUser } from "@/lib/projects";
 
 const PAGE_SIZE = 30;
 
+export const dynamic = "force-dynamic";
+
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ q?: string; projectId?: string; page?: string }> }) {
   const user = await requireApprovedUser();
   const params = await searchParams;
+  const enablePdfExport = process.env.ENABLE_PDF_EXPORT === "true";
   const q = params.q?.trim().toLowerCase() ?? "";
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
   const { project, projects } = await resolveProjectForUser(user, params.projectId);
@@ -186,18 +189,20 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                         <div className="report-actions">
                           <ReportDownloadLink
                             className="icon-link"
-                            href={`/api/reports/pdf?projectId=${project.id}&recordId=${record.id}`}
-                            iconSize={18}
-                            label="PDF"
-                            title="เปิด PDF สำหรับพิมพ์"
-                          />
-                          <ReportDownloadLink
-                            className="icon-link"
                             href={`/api/reports/docx?projectId=${project.id}&recordId=${record.id}`}
                             iconSize={18}
                             label="DOCX"
                             title="ดาวน์โหลดรายงาน DOCX"
                           />
+                          {enablePdfExport ? (
+                            <ReportDownloadLink
+                              className="icon-link"
+                              href={`/api/reports/pdf?projectId=${project.id}&recordId=${record.id}`}
+                              iconSize={18}
+                              label="PDF"
+                              title="เปิด PDF สำหรับพิมพ์"
+                            />
+                          ) : null}
                         </div>
                       </td>
                       {columns.map((column) => {

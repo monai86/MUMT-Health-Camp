@@ -7,3 +7,4 @@ prisma/dev.db-journal
 .DS_Store
 .scratch
 tsconfig.tsbuildinfo
+.vercel/
