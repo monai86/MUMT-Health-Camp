@@ -35,7 +35,6 @@ RUN npm ci --omit=dev && npm install prisma@^6.8.2
 # Copy standalone output and static assets
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/storage ./storage
 
